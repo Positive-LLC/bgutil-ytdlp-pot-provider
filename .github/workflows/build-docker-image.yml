@@ -10,7 +10,7 @@ on:
         default: "development"
         options:
           - development
-          - current
+          - latest
 
 env:
   AWS_REGION: us-east-1
@@ -61,7 +61,7 @@ jobs:
         working-directory: server/
         if: github.event.inputs.image-tag != 'development'
         run: |
-          echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
+          echo "image-tag=latest" >> $GITHUB_OUTPUT
 
       - name: Set image tag
         id: set-image-tag
@@ -145,7 +145,7 @@ jobs:
         working-directory: server/
         if: github.event.inputs.image-tag != 'development'
         run: |
-          echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
+          echo "image-tag=latest" >> $GITHUB_OUTPUT
 
       - name: Set image tag
         id: set-image-tag
