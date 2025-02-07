@@ -10,9 +10,7 @@ on:
         default: "development"
         options:
           - development
-          - patch
-          - minor
-          - major
+          - current
 
 env:
   AWS_REGION: us-east-1
