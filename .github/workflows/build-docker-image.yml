@@ -58,7 +58,7 @@ jobs:
 
       - name: Update service version
         id: update-service-version
-        working-directory: ./server
+        working-directory: server/
         if: github.event.inputs.image-tag != 'development'
         run: |
           echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
@@ -178,19 +178,6 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.image-tag }}
-
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: commit the project version to ${{ steps.set-image-tag.outputs.image-tag }}
-          commit_user_name: github-actions
-          tagging_message: v${{ steps.set-image-tag.outputs.image-tag }}
-
-      - name: Commit & Push changes
-        if: github.event.inputs.image-tag != 'development'
-        uses: actions-js/push@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tags: true
 
       - name: Slack Notification
         uses: 8398a7/action-slack@v3
