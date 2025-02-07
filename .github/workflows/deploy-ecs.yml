@@ -1,0 +1,130 @@
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target environment"
+        required: true
+        type: choice
+        default: "development"
+        options:
+          - development
+          - staging
+          - production
+      tag:
+        description: "Tag"
+        type: string
+        default: "latest"
+      api-default-containers:
+        description: "Default containers"
+        required: true
+        type: number
+        default: 1
+      api-min-containers:
+        description: "Minimum containers"
+        required: true
+        type: number
+        default: 1
+      api-max-containers:
+        description: "Maximum containers"
+        required: true
+        type: number
+        default: 5
+      worker-default-containers:
+        description: "Default containers for worker"
+        required: true
+        type: number
+        default: 1
+      download-url-expire-time:
+        description: "Download URL expire time"
+        required: true
+        type: number
+        default: 1800
+      proxyThresholdPercentLimit:
+        description: "Proxy Threshold Percent Limit"
+        required: true
+        type: number
+        default: 0.8
+      alertMemberIds:
+        description: "Alert Member Ids"
+        required: true
+        type: string
+        default: "U017JHX48CU, U012S2SCA15, U06DAGYGLLD"
+
+env:
+  AWS_REGION: us-east-1
+  TARGET_ENVIRONMENT: ${{ (contains(github.event.inputs.target, 'dev') && 'dev') || (contains(github.event.inputs.target, 'prod') && 'prod')  || (contains(github.event.inputs.target, 'stag') && 'stag') }}
+  INTERNAL_CLOUDMAP_STACK_NAME: pg-internal-cloudmap-${{ (contains(github.event.inputs.target, 'dev') && 'dev') || (contains(github.event.inputs.target, 'prod') && 'pro')  || (contains(github.event.inputs.target, 'stag') && 'stg') }}
+  ECS_CLUSTER_NAME: spark-${{ (contains(github.event.inputs.target, 'dev') && 'staging') || (contains(github.event.inputs.target, 'prod') && 'production')  || (contains(github.event.inputs.target, 'stag') && 'production') }}
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::400827480311:role/Github-actions
+          role-session-name: github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ECR repository URI by CloudFormation Output
+        id: get-ecr-repository-uri
+        run: |
+          ECR_REPOSITORY=$(aws cloudformation describe-stacks --stack-name "${{github.event.repository.name}}-shared-infra" --query "Stacks[0].Outputs[?OutputKey=='RepositoryUri'].OutputValue" --output text)
+          echo "repository=$ECR_REPOSITORY"  >> $GITHUB_OUTPUT
+
+      - name: Get CloudMap namespace by CloudFormation Output
+        id: get-cloudmap-namespace
+        run: |
+          CLOUDMAP_NAMESPACE=$(aws cloudformation describe-stacks --stack-name "${{ env.INTERNAL_CLOUDMAP_STACK_NAME }}" --query "Stacks[0].Outputs[?OutputKey=='DNSNamespace'].OutputValue" --output text)
+          echo "cloudmap_namespace=$CLOUDMAP_NAMESPACE"  >> $GITHUB_OUTPUT
+
+      - name: Get CloudMap DNS name by CloudFormation Output
+        id: get-cloudmap-dns-name
+        run: |
+          CLOUDMAP_DNS_NAME=$(aws cloudformation describe-stacks --stack-name "${{ env.INTERNAL_CLOUDMAP_STACK_NAME }}" --query "Stacks[0].Outputs[?OutputKey=='DNSName'].OutputValue" --output text)
+          echo "cloudmap_dns_name=$CLOUDMAP_DNS_NAME"  >> $GITHUB_OUTPUT
+
+      - name: Parse the image tag (without the v prefix)
+        id: parse-image-tag
+        run: |
+          echo "tag=$(echo ${{ github.ref }} | sed 's/refs\/tags\/v//')" >> $GITHUB_OUTPUT
+
+      - name: Set the image tag (If provided using the input, if not, use the tag from the git ref)
+        id: set-image-tag
+        run: |
+          if [ -z "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=$(echo ${{ github.ref }} | sed 's/refs\/tags\/v//')" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy ECS service
+        working-directory: ./cloudformation
+        run: |
+          aws cloudformation deploy --template-file ecs-service.yml --stack-name "${{github.event.repository.name}}-${{ env.TARGET_ENVIRONMENT }}" --parameter-overrides EcsClusterName=${{ env.ECS_CLUSTER_NAME }} DockerImage=${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.tag }} CloudMapNamespace=${{ steps.get-cloudmap-namespace.outputs.cloudmap_namespace }} CloudMapDnsName=${{ steps.get-cloudmap-dns-name.outputs.cloudmap_dns_name }} Stage=${{ env.TARGET_ENVIRONMENT }} ContainerPort=80 DefaultContainers=${{ github.event.inputs.api-default-containers }} MaxContainers=${{ github.event.inputs.api-max-containers }} MinContainers=${{ github.event.inputs.api-min-containers }} --capabilities CAPABILITY_NAMED_IAM --region ${{ env.AWS_REGION }}
+
+      - name: Slack Notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took,pullRequest # selectable (default: repo,message)
+          custom_payload: |
+            {
+              attachments: [{
+                color: '${{ job.status }}' === 'success' ? 'good' : '${{ job.status }}' === 'failure' ? 'danger' : 'warning',
+                text: `${process.env.AS_WORKFLOW}\n${process.env.AS_JOB} of ${process.env.AS_REPO}@${process.env.AS_REF} by ${process.env.AS_AUTHOR} ${{ job.status }} in ${process.env.AS_TOOK}`,
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.

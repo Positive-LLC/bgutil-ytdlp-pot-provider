@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An example CloudFormation template for Fargate.
+Parameters:
+  EcsClusterName:
+    Type: String
+    Description: The name of the ECS cluster
+    Default: spark-staging
+  DockerImage:
+    Type: String
+    Description: The Docker image to use
+    Default: 400827480311.dkr.ecr.us-east-1.amazonaws.com/chord-detection-api-service:0.0.3
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID
+    Default: vpc-04c6bec18848c88b7
+  Subnets:
+    Type: CommaDelimitedList
+    Description: The list of Environments key-value pair
+    Default: subnet-051d9246fdf0edcb6, subnet-03af2ec7c304adcd8
+  ContainerPort:
+    Type: Number
+    Default: 80
+  DefaultContainers:
+    Type: Number
+    Default: 2
+  # for autoscaling
+  MinContainers:
+    Type: Number
+    Default: 2
+  # for autoscaling
+  MaxContainers:
+    Type: Number
+    Default: 10
+  CloudMapNamespace:
+    Type: String
+    Description: The CloudMap namespace
+  CloudMapDnsName:
+    Type: String
+    Description: The CloudMap DNS name
+  OfficeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: The security group for the office
+    Default: sg-083f75421c7c34d1a
+
+Resources:
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ["-", [!Ref "AWS::StackName", ExecutionRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+
+  # A role for the containers
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ["-", [!Ref "AWS::StackName", TaskRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Join ["-", [!Ref "AWS::StackName", ExecCommandPolicy]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the container
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 10.0.0.0/16
+
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: !Join ["-", [!Ref "AWS::StackName", ApiTaskDefinition]]
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: 256
+      # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+      # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+      # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+      # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+      # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+      Memory: 512
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      # A role needed by ECS.
+      # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
+      # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
+      ExecutionRoleArn: !Ref ExecutionRole
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Ref "AWS::StackName"
+          Image: !Ref DockerImage
+          Environment:
+            - Name: PORT
+              Value: !Ref ContainerPort
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-stream-prefix: ecs
+
+  ApiService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Ref "AWS::StackName"
+      Cluster: !Ref EcsClusterName
+      TaskDefinition: !Ref ApiTaskDefinition
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DesiredCount: !Ref DefaultContainers
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # change to DISABLED if you're using private subnets that have access to a NAT gateway
+          AssignPublicIp: ENABLED
+          Subnets: !Ref Subnets
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+            - !Ref OfficeSecurityGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt CloudMapService.Arn
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Join ["/", [/ecs, !Ref "AWS::StackName", "api"]]
+      RetentionInDays: 365
+
+  CloudMapService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: media-download
+      NamespaceId: !Ref CloudMapNamespace
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+
+Outputs:
+  CloudMapServiceName:
+    Value: !Join [".", [!GetAtt CloudMapService.Name, !Ref CloudMapDnsName]]

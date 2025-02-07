@@ -1,0 +1,206 @@
+name: Build Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: "Image tag"
+        required: true
+        type: choice
+        default: "development"
+        options:
+          - development
+          - patch
+          - minor
+          - major
+
+env:
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: write # This is required for actions/checkout and push commit
+  actions: read
+
+jobs:
+  build-docker-image:
+    runs-on: ubuntu-latest
+    if: contains(fromJSON('["major", "minor", "patch", "development"]'), github.event.inputs.image-tag)
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::400827480311:role/Github-actions
+          role-session-name: github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URI by CloudFormation Output
+        id: get-ecr-repository-uri
+        run: |
+          ECR_REPOSITORY=$(aws cloudformation describe-stacks --stack-name "${{ github.event.repository.name }}-shared-infra" --query "Stacks[0].Outputs[?OutputKey=='ECR'].OutputValue" --output text)
+          echo "repository=$ECR_REPOSITORY"  >> $GITHUB_OUTPUT
+
+      - name: Prepare
+        id: prepare
+        env:
+          platform: ${{ matrix.platform }}
+        run: |
+          echo "platform-pair=${platform//linux\//}" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+
+      - name: Update service version
+        id: update-service-version
+        working-directory: ./server
+        if: github.event.inputs.image-tag != 'development'
+        run: |
+          echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
+
+      - name: Set image tag
+        id: set-image-tag
+        env:
+          IMAGE_TAG: ${{ steps.update-service-version.outputs.image-tag }}
+        run: |
+          if [[ -z $IMAGE_TAG ]]; then
+            IMAGE_TAG=development
+          else
+            IMAGE_TAG=${{ steps.update-service-version.outputs.image-tag }}
+          fi
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}
+          tags: ${{ steps.set-image-tag.outputs.image-tag }}-${{ steps.prepare.outputs.platform-pair }}
+
+      - # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./
+          file: Dockerfile
+          provenance: false
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.image-tag }}-${{ steps.prepare.outputs.platform-pair }}
+          outputs: type=image,name=${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.image-tag }}-${{ steps.prepare.outputs.platform-pair }},name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ steps.prepare.outputs.platform-pair }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-digests:
+    runs-on: ubuntu-latest
+    if: contains(fromJSON('["major", "minor", "patch", "development"]'), github.event.inputs.image-tag)
+    needs:
+      - build-docker-image
+    steps:
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::400827480311:role/Github-actions
+          role-session-name: github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URI by CloudFormation Output
+        id: get-ecr-repository-uri
+        run: |
+          ECR_REPOSITORY=$(aws cloudformation describe-stacks --stack-name "${{ github.event.repository.name }}-shared-infra" --query "Stacks[0].Outputs[?OutputKey=='ECR'].OutputValue" --output text)
+          echo "repository=$ECR_REPOSITORY"  >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+
+      - name: Update service version
+        id: update-service-version
+        working-directory: ./sever
+        if: github.event.inputs.image-tag != 'development'
+        run: |
+          echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
+
+      - name: Set image tag
+        id: set-image-tag
+        env:
+          IMAGE_TAG: ${{ steps.update-service-version.outputs.image-tag }}
+        run: |
+          if [[ -z $IMAGE_TAG ]]; then
+            IMAGE_TAG=development
+          else
+            IMAGE_TAG=${{ steps.update-service-version.outputs.image-tag }}
+          fi
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create -t ${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.image-tag }} $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ steps.login-ecr.outputs.registry }}/${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.image-tag }}
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: commit the project version to ${{ steps.set-image-tag.outputs.image-tag }}
+          commit_user_name: github-actions
+          tagging_message: v${{ steps.set-image-tag.outputs.image-tag }}
+
+      - name: Commit & Push changes
+        if: github.event.inputs.image-tag != 'development'
+        uses: actions-js/push@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tags: true
+
+      - name: Slack Notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took,pullRequest # selectable (default: repo,message)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
