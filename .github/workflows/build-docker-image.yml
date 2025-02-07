@@ -94,7 +94,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./
+          context: ./server
           file: Dockerfile
           provenance: false
           platforms: ${{ matrix.platform }}
