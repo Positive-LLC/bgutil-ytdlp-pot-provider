@@ -142,7 +142,7 @@ jobs:
 
       - name: Update service version
         id: update-service-version
-        working-directory: ./sever
+        working-directory: server/
         if: github.event.inputs.image-tag != 'development'
         run: |
           echo "image-tag=$(npm pkg get version)" >> $GITHUB_OUTPUT
