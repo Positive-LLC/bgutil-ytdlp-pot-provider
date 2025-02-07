@@ -88,10 +88,18 @@ jobs:
             echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Get the image sha
+        id: get-image-sha
+        run: |
+          apt install -y jq
+          REGISTRY_ID=$(aws ecr describe-repositories --repository-names bgutil-ytdlp-pot-provider --query 'repositories[*].registryId' --output text)
+          IMAGE_SHA=$(aws ecr describe-images --profile pg --region us-east-1 --registry-id "$REGISTRY_ID" --image-ids imageTag=latest --repository-name ${{ github.event.repository.name }} --query 'imageDetails' | jq -r '.[] | select(.imageTags[] | contains("${{ steps.set-image-tag.outputs.tag }}")) | .imageDigest')
+          echo "image_sha=$IMAGE_SHA" >> $GITHUB_OUTPUT
+
       - name: Deploy ECS service
         working-directory: ./cloudformation
         run: |
-          aws cloudformation deploy --template-file ecs-service.yml --stack-name "${{github.event.repository.name}}-${{ env.TARGET_ENVIRONMENT }}" --parameter-overrides EcsClusterName=${{ env.ECS_CLUSTER_NAME }} DockerImage=${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.set-image-tag.outputs.tag }} CloudMapNamespace=${{ steps.get-cloudmap-namespace.outputs.cloudmap_namespace }} CloudMapDnsName=${{ steps.get-cloudmap-dns-name.outputs.cloudmap_dns_name }} Stage=${{ env.TARGET_ENVIRONMENT }} ContainerPort=80 DefaultContainers=${{ github.event.inputs.api-default-containers }} MaxContainers=${{ github.event.inputs.api-max-containers }} MinContainers=${{ github.event.inputs.api-min-containers }} --capabilities CAPABILITY_NAMED_IAM --region ${{ env.AWS_REGION }}
+          aws cloudformation deploy --template-file ecs-service.yml --stack-name "${{github.event.repository.name}}-${{ env.TARGET_ENVIRONMENT }}" --parameter-overrides EcsClusterName=${{ env.ECS_CLUSTER_NAME }} DockerImage=${{ steps.get-ecr-repository-uri.outputs.repository }}:${{ steps.get-image-sha.outputs.image_sha }} CloudMapNamespace=${{ steps.get-cloudmap-namespace.outputs.cloudmap_namespace }} CloudMapDnsName=${{ steps.get-cloudmap-dns-name.outputs.cloudmap_dns_name }} Stage=${{ env.TARGET_ENVIRONMENT }} ContainerPort=80 DefaultContainers=${{ github.event.inputs.api-default-containers }} MaxContainers=${{ github.event.inputs.api-max-containers }} MinContainers=${{ github.event.inputs.api-min-containers }} --capabilities CAPABILITY_NAMED_IAM --region ${{ env.AWS_REGION }}
 
       - name: Slack Notification
         uses: 8398a7/action-slack@v3
