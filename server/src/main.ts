@@ -1,15 +1,15 @@
-import { SessionManager } from "./session_manager";
-import { VERSION } from "./version";
-import { Command } from "@commander-js/extra-typings";
-import express from "express";
-import bodyParser from "body-parser";
+import { Command } from "@commander-js/extra-typings"
+import bodyParser from "body-parser"
+import express from "express"
+import { SessionManager } from "./session_manager"
+import { VERSION } from "./version"
 
 const program = new Command().option("-p, --port <PORT>").option("--verbose");
 
 program.parse();
 const options = program.opts();
 
-const PORT_NUMBER = options.port || 4416;
+const PORT_NUMBER = options.port || process.env.PORT || 4416;
 
 const httpServer = express();
 httpServer.use(bodyParser.json());
