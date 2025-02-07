@@ -37,6 +37,10 @@ Parameters:
   CloudMapDnsName:
     Type: String
     Description: The CloudMap DNS name
+  CloudMapSubdomain:
+    Type: String
+    Description: The CloudMap subdomain
+    Default: po-token-provider
   OfficeSecurityGroup:
     Type: AWS::EC2::SecurityGroup::Id
     Description: The security group for the office
@@ -175,7 +179,7 @@ Resources:
   CloudMapService:
     Type: AWS::ServiceDiscovery::Service
     Properties:
-      Name: media-download
+      Name: !Ref CloudMapSubdomain
       NamespaceId: !Ref CloudMapNamespace
       DnsConfig:
         DnsRecords:
