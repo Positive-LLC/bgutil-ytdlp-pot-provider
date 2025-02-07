@@ -91,7 +91,6 @@ jobs:
       - name: Get the image sha
         id: get-image-sha
         run: |
-          apt install -y jq
           REGISTRY_ID=$(aws ecr describe-repositories --repository-names bgutil-ytdlp-pot-provider --query 'repositories[*].registryId' --output text)
           IMAGE_SHA=$(aws ecr describe-images --profile pg --region us-east-1 --registry-id "$REGISTRY_ID" --image-ids imageTag=latest --repository-name ${{ github.event.repository.name }} --query 'imageDetails' | jq -r '.[] | select(.imageTags[] | contains("${{ steps.set-image-tag.outputs.tag }}")) | .imageDigest')
           echo "image_sha=$IMAGE_SHA" >> $GITHUB_OUTPUT
