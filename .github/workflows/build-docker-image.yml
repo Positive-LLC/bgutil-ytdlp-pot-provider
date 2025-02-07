@@ -23,7 +23,6 @@ permissions:
 jobs:
   build-docker-image:
     runs-on: ubuntu-latest
-    if: contains(fromJSON('["major", "minor", "patch", "development"]'), github.event.inputs.image-tag)
     strategy:
       fail-fast: false
       matrix:
@@ -119,7 +118,6 @@ jobs:
 
   merge-digests:
     runs-on: ubuntu-latest
-    if: contains(fromJSON('["major", "minor", "patch", "development"]'), github.event.inputs.image-tag)
     needs:
       - build-docker-image
     steps:
