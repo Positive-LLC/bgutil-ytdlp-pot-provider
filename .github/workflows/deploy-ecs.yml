@@ -31,26 +31,6 @@ on:
         required: true
         type: number
         default: 5
-      worker-default-containers:
-        description: "Default containers for worker"
-        required: true
-        type: number
-        default: 1
-      download-url-expire-time:
-        description: "Download URL expire time"
-        required: true
-        type: number
-        default: 1800
-      proxyThresholdPercentLimit:
-        description: "Proxy Threshold Percent Limit"
-        required: true
-        type: number
-        default: 0.8
-      alertMemberIds:
-        description: "Alert Member Ids"
-        required: true
-        type: string
-        default: "U017JHX48CU, U012S2SCA15, U06DAGYGLLD"
 
 env:
   AWS_REGION: us-east-1
