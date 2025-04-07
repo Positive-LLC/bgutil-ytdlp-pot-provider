@@ -10,7 +10,7 @@
 
 A proof-of-origin token (POT) provider to be used alongside [coletdjnz's POT plugin framework](https://github.com/coletdjnz/yt-dlp-get-pot). We use [LuanRT's Botguard interfacing library](https://github.com/LuanRT/BgUtils) to generate the token.
 
-This is used to bypass the 'Sign in to confirm you're not a bot' message when invoking yt-dlp from an IP address flagged by YouTube. See _[What is a PO Token?](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#po-token-guide)_ for more details.
+This is used to bypass the 'Sign in to confirm you're not a bot' message when invoking yt-dlp from an IP address flagged by YouTube. See _[PO Token Guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide)_ for more details.
 
 The provider comes in two parts:
 
@@ -45,8 +45,8 @@ docker run --name bgutil-provider -d -p 4416:4416 brainicism/bgutil-ytdlp-pot-pr
 **Native:**
 
 ```shell
-# Replace 0.7.2 with the latest version or the one that matches the plugin
-git clone --single-branch --branch 0.7.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
+# Replace 0.8.2 with the latest version or the one that matches the plugin
+git clone --single-branch --branch 0.8.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
 cd bgutil-ytdlp-pot-provider/server/
 yarn install --frozen-lockfile
 npx tsc
@@ -54,24 +54,22 @@ node build/main.js
 ```
 
 <details>
-  <summary>Server Endpoints/Environment Variables</summary>
+  <summary>Server Command Line Options/Endpoints/Environment Variables</summary>
+
+**Options**
+
+- `-p, --port <PORT>`: The port on which the server listens.
 
 **Environment Variables**
 
-- **TOKEN_TTL**: The time in hours for a PO token to be considered valid. While there are no definitive answers on how long a token is valid, it has been observed to be valid for atleast a couple of days. Default: 6
+- **TOKEN_TTL**: The time in hours for a PO token to be considered valid. While there are no definitive answers on how long a token is valid, it has been observed to be valid for atleast a couple of days (Default: 6).
 
-**Endpoints**
-
-- **POST /get_pot**: Accepts a `visitor_data` (unauthenticated), `data_sync_id` (authenticated) or an empty body in the request body. If no identifier is passed, a new unauthenticated `visitor_data` will be generated. Returns `po_token` and the associated identifier `visit_identifier`.
-- **POST /invalidate_caches**: Resets the PO token cache, forcing new tokens to be generated on next fetch.
-- **GET /ping**: Ping the server. The response includes:
-  - `logging`: Logging verbosity(`normal` or `verbose`)
-  - `token_ttl_hours`: The current applied `TOKEN_TTL` value, defaults to 6.
-  - `server_uptime`: Uptime of the server process.
-  - `version`: Current server version.
-  </details>
+</details>
 
 #### (b) Generation Script Option
+
+> [!IMPORTANT]
+> This method is not recommended for high concurrency usage. Every yt-dlp call incurs the overhead of spawning a new node process to run the script. This method also handles cache concurrency poorly.
 
 1. Transpile the generation script to Javascript:
 
@@ -80,8 +78,8 @@ node build/main.js
 # on each yt-dlp invocation, clone/extract the source code into your home directory.
 # Replace `~` with `%USERPROFILE%` if using Windows
 cd ~
-# Replace 0.7.2 with the latest version or the one that matches the plugin
-git clone --single-branch --branch 0.7.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
+# Replace 0.8.2 with the latest version or the one that matches the plugin
+git clone --single-branch --branch 0.8.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
 cd bgutil-ytdlp-pot-provider/server/
 yarn install --frozen-lockfile
 npx tsc
@@ -130,6 +128,23 @@ If you installed the script in a different location, pass it as the extractor ar
 --extractor-args "youtube:getpot_bgutil_script=$WORKSPACE/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
 ```
 
+Note that if you want to pass multiple arguments to the `youtube` extractor, use a `;` seperated list.
+
+For example, you can use `--extractor-args "youtube:player_client=web;getpot_bgutil_script=/path/to/bgutil-ytdlp-pot-provider/server/build/generate_once.js"` if you want to set the youtube player client to web and use a custom script path.
+
+---
+
+We use a cache internally for all generated tokens. You can change the TTL (time to live) for the token cache with the environment variable `TOKEN_TTL`. It's currently impossible to use different TTLs for different token contexts (can be `gvs` or `player`, see [Technical Details](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide#technical-details) in the PO Token Guide). The environment variable is in hours and defaults to 6.  
+When using the script method, the environment variables will be passed down to the script. You can pass a `TOKEN_TTL` to yt-dlp to use a custom TTL.
+
 ---
 
 If both methods are available for use, the option (b) script will be prioritized.
+
+### Verification
+
+To check if the plugin was installed correctly, you should see the `bgutil` providers in yt-dlp's verbose output: `yt-dlp -v YOUTUBE_URL`.
+
+```
+[debug] [GetPOT] PO Token Providers: BgUtilHTTP-0.8.2, BgUtilScript-0.8.2
+```
