@@ -1,5 +1,5 @@
-import { Command } from "@commander-js/extra-typings"
 import bodyParser from "body-parser"
+import { Command } from "commander"
 import express from "express"
 import { SessionManager } from "./session_manager"
 import { VERSION } from "./version"
