@@ -1,8 +1,8 @@
-import bodyParser from "body-parser"
-import { Command } from "commander"
-import express from "express"
-import { SessionManager } from "./session_manager"
-import { VERSION } from "./version"
+import bodyParser from "body-parser";
+import { Command } from "commander";
+import express from "express";
+import { SessionManager } from "./session_manager";
+import { VERSION } from "./version";
 
 const program = new Command().option("-p, --port <PORT>").parse();
 
