@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 import bodyParser from "body-parser"
 import { Command } from "commander"
-=======
-import { Command } from "@commander-js/extra-typings"
-import bodyParser from "body-parser"
->>>>>>> 3d145db (Add support for environment variable PORT in server configuration)
 import express from "express"
 import { SessionManager } from "./session_manager"
 import { VERSION } from "./version"
