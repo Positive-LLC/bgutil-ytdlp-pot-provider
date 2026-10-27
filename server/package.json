@@ -18,7 +18,7 @@
         "format": "npx prettier --write 'src/**/*.{js,ts}'"
     },
     "dependencies": {
-        "axios": "^1.7.9",
+        "axios": "^1.20.0",
         "bgutils-js": "^3.1.1",
         "body-parser": "^1.20.3",
         "commander": "github:tj/commander.js.git#develop",
